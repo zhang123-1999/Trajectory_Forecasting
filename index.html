@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>行人轨迹预测：生成式方法综述与复现实验</title>
+  <meta name="description" content="综述 Social GAN、Trajectron++ 与 MID 三种行人轨迹预测方法，并整理复现实验结果。" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='white'/%3E%3Cpath d='M6 24c7-4 10-9 20-16' stroke='%2320242a' stroke-width='3' fill='none'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="scroll-progress" aria-hidden="true"><div class="sp-bar"></div></div>
+
+  <header class="topbar">
+    <a class="topbar-brand" href="#hero" aria-label="回到页面顶部">
+      <span>TP</span>
+      <strong>Trajectory Forecasting</strong>
+    </a>
+    <nav class="topbar-nav" aria-label="主导航">
+      <a href="#problem">问题</a>
+      <a href="#unified">统一视角</a>
+      <a href="#sgan">SGAN</a>
+      <a href="#trajectron">Trajectron++</a>
+      <a href="#mid">MID</a>
+      <a href="#results">复现</a>
+      <a href="#video">视频</a>
+    </nav>
+  </header>
+
+  <main class="paper-shell">
+    <article class="paper-article">
+      <section class="hero-section text-first-hero" id="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Pedestrian trajectory prediction · generative modeling</p>
+          <h1 id="hero-title">行人轨迹预测中的生成式建模方法</h1>
+          <p class="hero-lead">
+            给定历史轨迹 X 与场景上下文 C，行人未来轨迹 Y 通常具有多模态分布。
+            轨迹预测的目标可表述为估计条件分布 <strong>p(Y | X, C)</strong>，
+            其中 C 包含邻居运动、场景约束、语义地图以及动力学条件。
+          </p>
+          <p class="hero-lead">
+            本小组围绕行人轨迹预测开展论文复现工作，每位成员分别复现一篇相关研究，
+            并在统一的问题定义下汇总方法机制、实验指标与评估口径。
+            本文进一步对 Social GAN、Trajectron++ 与 MID 三种方法进行整理与对比。
+          </p>
+        </div>
+
+        <div class="paper-list" aria-label="三篇论文信息">
+          <article>
+            <span class="method-mark sgan">2018</span>
+            <h2>Social GAN</h2>
+            <p>Socially Acceptable Trajectories with Generative Adversarial Networks</p>
+            <small>Generative adversarial modeling with variety loss.</small>
+          </article>
+          <article>
+            <span class="method-mark traj">2020/2021</span>
+            <h2>Trajectron++</h2>
+            <p>Dynamically-Feasible Trajectory Forecasting With Heterogeneous Data</p>
+            <small>Directed spatiotemporal graph with discrete CVAE latent states.</small>
+          </article>
+          <article>
+            <span class="method-mark mid">2022</span>
+            <h2>MID</h2>
+            <p>Stochastic Trajectory Prediction via Motion Indeterminacy Diffusion</p>
+            <small>Motion indeterminacy diffusion with reverse denoising.</small>
+          </article>
+        </div>
+
+        <figure class="paper-figure hero-figure compact-figure">
+          <svg viewBox="0 0 840 420" role="img" aria-labelledby="fig1-title fig1-desc" xmlns="http://www.w3.org/2000/svg">
+            <title id="fig1-title">条件轨迹分布</title>
+            <desc id="fig1-desc">同一段历史轨迹之后，未来样本分叉为直行、左转和绕行模式。</desc>
+            <defs>
+              <pattern id="grid-hero" width="54" height="54" patternUnits="userSpaceOnUse">
+                <path d="M54 0H0V54" fill="none" stroke="#e3dfd3" stroke-width="1" />
+              </pattern>
+            </defs>
+            <rect x="22" y="20" width="796" height="356" rx="6" fill="#ffffff" stroke="none" />
+            <text x="70" y="52" class="svg-label">FIG. 1 / p(Y | X, C)</text>
+            <rect x="70" y="72" width="684" height="246" fill="url(#grid-hero)" />
+            <path d="M70 318H766M70 318V62" class="svg-axis" />
+            <path d="M92 286C142 262 188 230 236 196C278 166 312 154 348 150" class="history-line" />
+            <circle cx="348" cy="150" r="7" class="current-point" />
+            <path class="future-line sgan-line animated-path path-a" d="M348 150C438 76 574 62 736 70" />
+            <path class="future-line traj-line animated-path path-b" d="M348 150C456 150 588 158 736 144" />
+            <path class="future-line mid-line animated-path path-c" d="M348 150C438 228 574 278 736 298" />
+            <path class="mean-line" d="M348 150C468 158 606 184 736 210" />
+            <text x="496" y="86" class="svg-small">sampled future</text>
+            <text x="536" y="210" class="svg-small">L2 average</text>
+            <text x="120" y="302" class="svg-small">observed history X</text>
+          </svg>
+          <figcaption>
+            Figure 1. 轨迹预测的核心对象是一族条件未来。虚线均值有时看起来“误差最小”，但它未必对应任何真实行人的可行选择。
+          </figcaption>
+        </figure>
+      </section>
+
+      <div class="paper-layout">
+        <aside class="paper-toc" aria-label="文章目录">
+          <p>Contents</p>
+          <nav>
+            <a href="#problem">1. 问题定义</a>
+            <a href="#unified">2. 统一视角</a>
+            <a href="#sgan">3. Social GAN</a>
+            <a href="#trajectron">4. Trajectron++</a>
+            <a href="#mid">5. MID</a>
+            <a href="#compare">6. 横向对比</a>
+            <a href="#results">7. 复现实验</a>
+            <a href="#video">8. 视频展示</a>
+            <a href="#references">参考文献</a>
+          </nav>
+        </aside>
+
+        <div class="chapters longform-body">
+          <section class="chapter" id="problem" aria-labelledby="problem-title">
+            <p class="chapter-index">Chapter 1</p>
+            <h2 id="problem-title">问题定义与评价对象</h2>
+            <div class="reading-column">
+              <p>
+                三篇论文的出发点高度一致：人类运动天然具有多模态性。Social GAN 在论文开头把困难拆成三个词：
+                interpersonal、socially acceptable 和 multimodal。第一项对应多智能体交互；
+                第二项对应符合社会规范的可行运动；第三项对应同一历史条件下的多种可能未来。
+                这三个判断共同推翻了单路径回归的默认假设。
+              </p>
+              <p>
+                在 ETH/UCY 这类行人数据集中，一个样本通常包含 8 帧观测与 12 帧未来。若把每个未来点当作普通回归标签，
+                模型会倾向于最小化欧氏距离。问题在于，欧氏损失会对多个合理模式做平均：左转与右转的均值可能指向障碍物，
+                绕行与直行的均值可能穿过人群密集区域。此时误差下降并不等价于轨迹合理性提高。
+              </p>
+              <p>
+                因此，轨迹预测更自然的写法是条件概率建模。X 表示历史轨迹，Y 表示未来轨迹，C 表示场景与邻居上下文。
+                模型不再只输出点估计 f(X)，而是学习 p(Y | X, C)。该分布可以是隐式的，例如 GAN 通过不同噪声生成不同样本；
+                也可以是显式或半显式的，例如 Trajectron++ 枚举离散潜变量 z；还可以通过扩散链展开，例如 MID 从噪声逐步还原未来。
+              </p>
+              <p>
+                在该视角下，三篇论文分别强调不同建模环节。Social GAN 关注生成轨迹的社会可接受性与多样性；
+                Trajectron++ 将交互、动力学和异构数据组织到可扩展图模型中；MID 使用扩散过程建模运动不确定性的逐步消除。
+              </p>
+              <p>
+                复现时最容易忽视的是评估问题。ADE 和 FDE 本身只是几何误差，无法完整描述概率分布。Best-of-20 会从 20 条样本里挑最接近真实未来的一条，
+                因而数值天然优于单样本；Trajectron++ 的 Full 模式枚举潜变量，Most Likely 则只取最可能模式；MID 的 DDPM 步数和 DDIM 变体也会改变生成结果。
+                如果把这些口径混在一起，表格会给出看似客观、实际不公平的排名。
+              </p>
+              <p>
+                轨迹预测综述需要同时描述问题、模型和评估。仅比较网络结构不足以判断方法差异；
+                若不说明采样口径，ADE/FDE 数值也无法构成有效比较。
+              </p>
+              <p>
+                条件变量 C 在不同方法中具有不同实现形式。SGAN 主要通过个体间相对位置引入交互；
+                Trajectron++ 将场景表示为图结构、地图特征和智能体类型；
+                MID 先提取历史与交互状态特征，再将其作为反向扩散过程的条件。
+                因而 C 的具体形式取决于方法设计。
+              </p>
+              <p>
+                因此，方法比较应从共同目标 p(Y | X, C) 出发，依次分析上下文编码、随机性机制和训练目标。
+                复现偏差往往来自问题定义、数据口径和生成机制未对齐，而不只是实现细节差异。
+              </p>
+              <div class="formula-line">
+                <span>single path regression: Ŷ = f(X, C)</span>
+                <span>stochastic forecasting: Y ~ p(Y | X, C)</span>
+                <span>evaluation must specify: sample count, latent mode policy, diffusion sampler</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="chapter" id="unified" aria-labelledby="unified-title">
+            <p class="chapter-index">Chapter 2</p>
+            <h2 id="unified-title">条件生成框架</h2>
+            <div class="reading-column">
+              <p>
+                可以把三篇方法都写成一个条件生成框架。首先，编码器从历史轨迹中提取运动状态；
+                其次，交互模块把邻居和场景上下文汇入该状态；最后，生成模块引入某种随机性，从而得到未来轨迹样本。
+                区别在于随机变量的形式与训练约束不同。
+              </p>
+              <p>
+                Social GAN 的随机性是注入生成器的噪声 z。它不显式声明 z 对应“左转”“直行”或“绕行”，而是让对抗训练和 Variety Loss 共同塑造样本分布。
+                这种方法的语言是隐式的：判别器说轨迹是否像真实人群，Variety Loss 说候选集合是否覆盖真实未来附近。
+                其结构直接，但训练稳定性依赖对抗优化过程，且潜变量缺少显式语义。
+              </p>
+              <p>
+                Trajectron++ 的随机性是 CVAE 中的离散潜变量 z。它把多模态性放在一个可枚举的高层行为模式上，
+                再用解码器给出每个模式下的轨迹分布。Full 模式可以遍历 z，
+                Most Likely 可以取最可能的 z，采样模式可以按 p(z | x) 抽样。评估口径需随结果一并记录。
+              </p>
+              <p>
+                MID 的随机性由整条扩散链表征。它从纯噪声或高不确定区域出发，每一步都在历史条件约束下减少不确定性。
+                这让生成过程更细粒度：链长短时样本更分散，链长长时轨迹更集中。论文将这种机制称为 Motion Indeterminacy Diffusion，
+                其目标是显式模拟运动不确定性从高到低的变化过程。
+              </p>
+              <p>
+                交互建模也经历了类似演化。Social GAN 用全局池化把所有人的相对位置压缩成 pooled vector；
+                Trajectron++ 用 directed spatiotemporal graph 明确表示节点与边，并允许不同语义类型使用不同编码器；
+                MID 在实验中可以装备已有的时间-社会编码器，论文中就使用 Trajectron++ 的编码能力作为条件特征来源。
+                因而 MID 的主要创新集中于扩散解码器，而非重新定义社交交互编码器。
+              </p>
+              <p>
+                从训练目标看，三者也体现了生成模型发展的三种范式。SGAN 依靠判别器给出数据分布层面的反馈，
+                训练信号带有“像不像真实样本”的整体判断；Trajectron++ 依靠变分目标，把潜变量分布、重构质量和多模态结构放在同一个概率框架中；
+                MID 则把似然优化转化为一系列噪声预测任务。三者以不同训练目标近似同一个条件后验分布。
+              </p>
+              <p>
+                统一框架有助于分析各方法的适用条件。
+                隐式 GAN 样本直观，但概率密度难以读出；CVAE 模式清晰，但离散潜空间大小和 KL 权重会影响模式利用；
+                扩散生成表达力强，但采样链带来速度和调参成本。
+              </p>
+            </div>
+
+            <figure class="paper-figure compact-figure">
+              <svg viewBox="0 0 860 360" role="img" aria-label="三种方法统一流程" xmlns="http://www.w3.org/2000/svg">
+                <rect x="24" y="24" width="812" height="280" rx="6" fill="#ffffff" stroke="none" />
+                <text x="54" y="58" class="svg-label">FIG. 2 / ONE CONDITIONAL GENERATION FRAME</text>
+                <g class="unified-flow">
+                  <rect x="70" y="118" width="150" height="70" rx="4" />
+                  <text x="145" y="148">X and C</text>
+                  <text x="145" y="170">history + context</text>
+                  <path d="M220 153H292" />
+                  <rect x="292" y="72" width="170" height="58" rx="4" class="sgan-box" />
+                  <text x="377" y="97">SGAN</text>
+                  <text x="377" y="116">noise z + GAN</text>
+                  <rect x="292" y="146" width="170" height="58" rx="4" class="traj-box" />
+                  <text x="377" y="171">Trajectron++</text>
+                  <text x="377" y="190">discrete CVAE z</text>
+                  <rect x="292" y="220" width="170" height="58" rx="4" class="mid-box" />
+                  <text x="377" y="245">MID</text>
+                  <text x="377" y="264">reverse diffusion</text>
+                  <path d="M462 101C528 101 548 153 616 153" />
+                  <path d="M462 175C528 175 548 153 616 153" />
+                  <path d="M462 249C528 249 548 153 616 153" />
+                  <rect x="616" y="118" width="170" height="70" rx="4" />
+                  <text x="701" y="148">Y samples</text>
+                  <text x="701" y="170">from p(Y | X, C)</text>
+                </g>
+              </svg>
+              <figcaption>
+                Figure 2. 三篇论文共享“条件编码 + 交互建模 + 随机生成”的骨架；差异集中在随机性机制和训练目标。
+              </figcaption>
+            </figure>
+          </section>
+
+          <section class="chapter method-chapter method-sgan" id="sgan" aria-labelledby="sgan-title">
+            <p class="chapter-index">Chapter 3</p>
+            <h2 id="sgan-title">Social GAN：对抗生成与多样性损失</h2>
+            <div class="reading-column">
+              <p>
+                Social GAN 从 L2 回归的局限出发构建生成式预测模型。
+                行人在拥挤场景中会避让、让路、绕行、跟随，许多轨迹在物理上可能但在社会上不自然。
+                传统 social force 等规则可以表达部分相互作用，但难以覆盖复杂人群中的隐含规范。
+                因此该方法使用生成对抗训练，让判别器从数据中学习完整轨迹的社会可接受性。
+              </p>
+              <p>
+                模型由三块组成：Generator、Pooling Module 和 Discriminator。Generator 是 RNN encoder-decoder：
+                对每个行人的历史坐标做嵌入，再用 LSTM 编码到隐藏状态；Decoder 以该隐藏状态、池化后的社交上下文和随机噪声为条件，生成未来坐标序列。
+                Discriminator 同样读取完整轨迹，也就是历史与未来拼接后的序列，判断它是真实轨迹还是生成轨迹。
+              </p>
+              <p>
+                Pooling Module 是论文的第二个关键点。早期 Social LSTM 在局部网格中池化邻居，容易受网格尺度限制。
+                Social GAN 计算目标行人与场景中其他人的相对位置，把相对位置和邻居 hidden state 输入 MLP，再做 max pooling。
+                这种“global pooling”使模型不只看固定小邻域，也不需要为每个网格维护复杂状态；它把所有邻居对当前行人的影响压缩为一个 pooled vector。
+              </p>
+              <p>
+                但是，仅有 GAN 还不足以避免模式塌缩。若生成器发现某条中间轨迹能骗过判别器，它可能对不同噪声都输出相似结果。
+                Variety Loss 用于缓解这种倾向：对同一个观测历史生成 k 条候选，只对最接近真实未来的一条施加 L2 惩罚。
+                这样训练信号不会要求每条样本都逼近同一个标签，而是鼓励样本集合覆盖真实未来可能出现的位置。
+              </p>
+              <p>
+                SGAN 的指标必须写明 best-of-k。k 越大，候选集中出现接近真实未来样本的概率越高，ADE/FDE 往往越低。
+                这不代表模型在单次预测中一定更准确，而是说明它的样本集合覆盖更宽。把 best-of-20 与 best-of-1 放在同一个排名表中，会高估多次采样模型的单次决策能力。
+              </p>
+              <p>
+                从复现角度看，SGAN 最值得保留的是问题意识：社会可接受性不等同于物理可达性，多样性不能靠简单加噪声保证。
+                其局限也较明确：GAN 训练容易不稳定，判别器给出的真实性信号缺少可分解语义，生成样本与具体意图之间没有显式对应关系。
+                后续图模型与扩散模型在结构化交互和生成稳定性方面进一步扩展了这一问题。
+              </p>
+              <p>
+                Generator 在场景内共享编码器权重，而非为每个行人单独训练一套参数。
+                共享参数让模型能处理不同数量的行人，也让“行人运动规律”成为可迁移表示；Pooling Module 再为每个目标行人生成不同的社交上下文。
+                因此 SGAN 可以同时预测场景中所有人的未来，而非逐个行人独立外推。
+              </p>
+              <p>
+                Discriminator 的输入是完整轨迹而非单个未来点，这一点和“社会可接受性”紧密相关。
+                一条轨迹是否自然，往往要看历史速度、转向连续性、与邻居路径的相对关系，而非只看终点是否靠近真实终点。
+                判别器因此承担了一个全局质量评估器的角色：它不会告诉生成器“应该左转 12 度”，但会惩罚那些整体上不像人群行为的序列。
+              </p>
+              <p>
+                SGAN 的代表性在于它直接揭示了多模态监督学习的矛盾：
+                它用最直接的方式暴露了多模态预测的核心矛盾，即“我们希望生成多条合理路径，但训练数据每次只给出一条真实未来”。
+                Variety Loss 对这一监督矛盾作出工程化处理：候选集合中至少一条轨迹需要解释观测到的未来。
+              </p>
+              <div class="formula-line sgan-formula">
+                <span>G: (X, pooled context, z) -> Y samples</span>
+                <span>D: real/fake score on complete trajectory</span>
+                <span>L_variety = min_k ||Y - Y_hat^(k)||_2</span>
+              </div>
+            </div>
+
+            <figure class="paper-figure compact-figure interactive-figure">
+              <div class="figure-toolbar" role="group" aria-label="选择 Social GAN 候选数量">
+                <button type="button" class="is-active" data-sgan-k="1">k=1</button>
+                <button type="button" data-sgan-k="5">k=5</button>
+                <button type="button" data-sgan-k="20">k=20</button>
+              </div>
+              <svg class="sgan-variety" viewBox="0 0 620 300" role="img" aria-label="Variety Loss 候选覆盖示意" xmlns="http://www.w3.org/2000/svg">
+                <rect x="38" y="24" width="520" height="220" rx="5" fill="#ffffff" stroke="none" />
+                <g class="mini-grid">
+                  <path d="M78 54H530M78 96H530M78 138H530M78 180H530M78 222H530" />
+                  <path d="M78 54V230M146 54V230M214 54V230M282 54V230M350 54V230M418 54V230M486 54V230" />
+                </g>
+                <path d="M78 230H538M78 230V46" class="svg-axis" />
+                <path d="M92 206C138 186 174 160 216 132" class="history-line thin" />
+                <circle cx="216" cy="132" r="6" class="current-point" />
+                <path d="M216 132C292 74 410 58 520 58" class="ground-truth" />
+                <g class="sgan-sample-set is-active" data-sgan-set="1">
+                  <path d="M216 132C300 132 406 138 520 146" class="sample-line" />
+                </g>
+                <g class="sgan-sample-set" data-sgan-set="5">
+                  <path d="M216 132C292 74 410 58 520 58" class="sample-line" />
+                  <path d="M216 132C306 116 414 110 520 104" class="sample-line faint" />
+                  <path d="M216 132C314 144 420 158 520 172" class="sample-line faint" />
+                  <path d="M216 132C286 184 408 210 520 224" class="sample-line faint" />
+                  <path d="M216 132C282 90 398 78 520 82" class="sample-line faint" />
+                </g>
+                <g class="sgan-sample-set" data-sgan-set="20">
+                  <path d="M216 132C292 74 410 58 520 58" class="sample-line" />
+                  <path d="M216 132C306 116 414 110 520 104" class="sample-line faint" />
+                  <path d="M216 132C314 144 420 158 520 172" class="sample-line faint" />
+                  <path d="M216 132C286 184 408 210 520 224" class="sample-line faint" />
+                  <path d="M216 132C282 90 398 78 520 82" class="sample-line faint" />
+                  <path d="M216 132C300 64 420 40 530 42" class="sample-line faint" />
+                  <path d="M216 132C330 92 438 84 532 88" class="sample-line faint" />
+                  <path d="M216 132C326 132 430 134 536 128" class="sample-line faint" />
+                  <path d="M216 132C312 168 420 188 536 198" class="sample-line faint" />
+                  <path d="M216 132C292 210 400 236 520 238" class="sample-line faint" />
+                </g>
+              </svg>
+              <figcaption>
+                Figure 3. <span data-sgan-caption>k=1 时模型只能提交一条猜测，常退化为中庸轨迹。</span>
+              </figcaption>
+            </figure>
+          </section>
+
+          <section class="chapter method-chapter method-traj" id="trajectron" aria-labelledby="traj-title">
+            <p class="chapter-index">Chapter 4</p>
+            <h2 id="traj-title">Trajectron++：有向时空图与条件变分建模</h2>
+            <div class="reading-column">
+              <p>
+                Trajectron++ 的论文目标比纯行人轨迹更宽：它面向机器人和自动驾驶中的多智能体预测。
+                因此模型需要同时处理车辆、行人、自车计划、语义地图等异构数据。
+                因此论文题目中的 “Dynamically-Feasible” 和 “Heterogeneous Data” 都很重要：预测结果既要符合运动学约束，也要能吸收不止轨迹坐标的环境信息。
+              </p>
+              <p>
+                它的核心表示是 directed spatiotemporal graph，有向时空图。节点代表智能体，边代表交互影响。
+                使用有向边的理由很直接：影响关系可能是不对称的。行人可能需要对车辆让行，但车辆的规划系统可能只在特定范围内考虑该行人；
+                不同智能体类型的感知范围、动力学约束和行为模式都不相同。无向图会把这种差异抹平。
+              </p>
+              <p>
+                编码阶段可以分成几类信息。节点历史编码器读取目标智能体自身的状态序列；边编码器聚合同类型邻居的影响；
+                地图编码器把局部语义地图压缩成环境特征；如果有机器人未来计划，还可以加入 future-conditional prediction，
+                也就是在预测其他智能体时显式条件化自车未来动作。这使模型能服务于规划：规划器可以评估不同自车动作会诱发怎样的人群反应。
+              </p>
+              <p>
+                多模态部分由 CVAE 完成。Trajectron++ 引入离散 categorical latent variable z，
+                把 p(y | x) 写成对 z 的求和：每个 z 对应一种高层潜在行为模式，解码器给出该模式下的轨迹分布。
+                论文中离散潜空间大小为 25，这使训练时可以直接枚举 z 的贡献，而不必依赖 Gumbel-Softmax 采样来反传。
+              </p>
+              <p>
+                这一点对评估非常关键。若报告 Full distribution，就意味着利用所有潜变量模式的信息；
+                若报告 Most Likely，就意味着只取最高概率模式；若做随机采样，则又是另一种样本策略。
+                它们都来自同一个模型，但回答的问题不同。Full 更接近“模型知道哪些未来可能发生”，Most Likely 更接近“模型最相信哪个未来会发生”。
+              </p>
+              <p>
+                Trajectron++ 相比 SGAN 的最大变化，是把交互结构从隐式池化变成显式图结构。
+                SGAN 的 pooled vector 很难解释是哪一个邻居、哪一种语义触发了某条轨迹；Trajectron++ 至少在结构上区分了节点、边、地图和潜变量。
+                这并不意味着它完全可解释，但它把模型组件和场景因素建立了更清晰的对应关系。
+              </p>
+              <p>
+                从复现角度看，Trajectron++ 的复杂性也更高。数据预处理要生成场景图，节点类型和边类型要对齐，地图裁剪与坐标系变换要一致，
+                评估脚本要明确输出口径。许多指标差异来自 Full、ML、采样数、预测时间步和坐标单位未统一。
+              </p>
+              <p>
+                动力学可行性是 Trajectron++ 相比许多行人-only 方法更工程化的一点。论文讨论的目标不只是画出接近标签的坐标点，
+                而是让预测能接入机器人规划和控制。对于车辆类智能体，位置序列不能违反基本运动学约束；对于行人，虽然动力学更自由，
+                但速度、加速度和转向连续性仍会影响轨迹可信度。Trajectron++ 通过输出控制动作分布并结合动态模型，使预测能够接入下游规划。
+              </p>
+              <p>
+                异构数据的加入也改变了“上下文”的含义。SGAN 的上下文主要来自其他人的运动；Trajectron++ 可以把语义地图作为独立信息源。
+                在道路场景中，车道、人行横道、障碍物和可通行区域并不总能从历史轨迹中反推出。
+                地图编码器将物理环境约束显式放入条件分布中。
+              </p>
+              <p>
+                Trajectron++ 强调结构化条件建模。多模态预测不仅需要随机变量，
+                还需要限定随机变量依赖的信息。一个 z 若只条件化自身历史，表达的是个体意图；若同时条件化图边、地图和自车计划，
+                它表达的就是交互情境下的意图。这个区别比单纯展示 CVAE 框图更重要。
+              </p>
+              <div class="formula-line traj-formula">
+                <span>G = (V, E): nodes are agents, directed edges are interactions</span>
+                <span>p(Y | X, C) = sum_z p(Y | X, C, z) p(z | X, C)</span>
+                <span>z: discrete high-level latent behavior mode</span>
+              </div>
+            </div>
+
+            <figure class="paper-figure compact-figure interactive-figure">
+              <div class="figure-toolbar graph-toolbar" role="group" aria-label="选择图节点">
+                <button type="button" class="is-active" data-graph-node="ego">ego</button>
+                <button type="button" data-graph-node="neighbor">neighbor</button>
+                <button type="button" data-graph-node="map">map</button>
+                <button type="button" data-graph-node="latent">z</button>
+              </div>
+              <svg class="traj-graph" data-active-node="ego" viewBox="0 0 620 330" role="img" aria-label="Trajectron++ 有向时空图" xmlns="http://www.w3.org/2000/svg">
+                <rect x="38" y="24" width="520" height="260" rx="5" fill="#ffffff" stroke="none" />
+                <path class="graph-edge edge-neighbor" d="M158 142C226 104 274 104 318 150" />
+                <path class="graph-edge edge-neighbor" d="M472 132C422 112 370 116 318 150" />
+                <path class="graph-edge edge-map" d="M318 150C318 104 348 76 394 58" />
+                <path class="graph-edge edge-latent" d="M318 150C366 180 394 212 420 252" />
+                <g class="graph-node is-selected" data-graph-node="ego" tabindex="0" role="button" aria-label="ego 节点">
+                  <circle cx="318" cy="150" r="30" />
+                  <text x="318" y="156">ego</text>
+                </g>
+                <g class="graph-node" data-graph-node="neighbor" tabindex="0" role="button" aria-label="邻居节点">
+                  <circle cx="154" cy="142" r="23" />
+                  <text x="154" y="148">n1</text>
+                </g>
+                <g class="graph-node" data-graph-node="neighbor" tabindex="0" role="button" aria-label="邻居节点">
+                  <circle cx="478" cy="132" r="23" />
+                  <text x="478" y="138">n2</text>
+                </g>
+                <g class="graph-node" data-graph-node="map" tabindex="0" role="button" aria-label="地图节点">
+                  <rect x="362" y="40" width="68" height="42" rx="4" />
+                  <text x="396" y="66">map</text>
+                </g>
+                <g class="graph-node" data-graph-node="latent" tabindex="0" role="button" aria-label="潜变量节点">
+                  <rect x="386" y="234" width="68" height="42" rx="4" />
+                  <text x="420" y="260">z</text>
+                </g>
+                <path class="future-line traj-line" d="M318 150C374 160 428 182 500 208" />
+                <path class="future-line traj-line faint" d="M318 150C374 132 426 118 506 108" />
+                <path class="future-line traj-line faint" d="M318 150C366 198 430 236 508 260" />
+              </svg>
+              <figcaption>
+                Figure 4. 点击或悬停节点可高亮 Trajectron++ 中邻居、地图和离散潜变量进入 ego 解码路径的方式。
+              </figcaption>
+            </figure>
+          </section>
+
+          <section class="chapter method-chapter method-mid" id="mid" aria-labelledby="mid-title">
+            <p class="chapter-index">Chapter 5</p>
+            <h2 id="mid-title">MID：运动不确定性扩散</h2>
+            <div class="reading-column">
+              <p>
+                MID 从运动不确定性的连续变化出发。未来轨迹的不确定性来自可通行区域中的多种可能路径；
+                低维潜变量难以完整表达这种变化。作者借鉴扩散模型，把真实轨迹逐步加噪直到接近高斯噪声，
+                再学习反向过程，从高不确定区域逐步丢弃不可能部分，最后生成符合历史条件的轨迹。
+              </p>
+              <p>
+                该方法的关键是运动不确定性的变化过程。在正向扩散中，真实未来 y0 被逐步扰动为 y1, y2, ..., yK；
+                当 K 足够大时，yK 接近 N(0, I)。在反向生成中，模型从 yK 开始，通过参数化高斯转移 pθ(yk-1 | yk, f) 逐步去噪，
+                其中 f 是由历史轨迹和社会交互编码得到的条件特征。
+              </p>
+              <p>
+                MID 不把社交编码作为主要创新。论文明确说明，网络可以装备已有编码器，实验中使用 Trajectron++ 的 encoder 来获得较强表示能力。
+                真正的变化发生在解码端：它设计了 Transformer-based decoder 来建模扩散链中的时间依赖。
+                输入包括当前噪声轨迹 yk、时间步嵌入和条件特征 f，输出用于估计该步应去掉的噪声。
+              </p>
+              <p>
+                训练目标来自扩散模型的常见简化：网络学习预测添加到轨迹中的噪声 ε。
+                该目标使模型在每个扩散步估计当前轨迹中与条件分布不一致的噪声成分。
+                论文的损失可以理解为让 εθ(yk, k, x) 尽可能还原真实噪声，从而在推理时一步步把噪声轨迹推回数据分布。
+              </p>
+              <p>
+                链长是 MID 中关键的复现变量。论文图示了 reverse diffusion step 对 determinacy 和 diversity 的影响：
+                去噪步数越少，样本保留更多不确定性，分布更散；去噪步数越多，轨迹更集中，更接近确定预测。
+                因此 MID 的 ADE/FDE 不能只写模型名，还要写 DDPM 或 DDIM、采样步数和 Best-of-N 口径。
+              </p>
+              <p>
+                相比 Trajectron++，MID 的优点是生成过程表达力更强，可以通过扩散步数调节多样性与确定性；
+                缺点是推理开销更高，结果对采样器和步数敏感。相比 SGAN，它的训练通常更稳定，不需要判别器博弈；
+                但每一步去噪并不天然对应可解释意图，仍需结合条件编码和样本分布分析。
+              </p>
+              <p>
+                在轨迹预测中，扩散过程的语义是从高不确定运动区域中逐渐排除不符合历史条件的路径。
+                该建模方式区别于 SGAN 的低维噪声注入，也区别于 Trajectron++ 的离散潜变量枚举。
+              </p>
+              <p>
+                MID 的链长控制 diversity 与 determinacy 的权衡。短链保留更多随机性，适合展示多样候选；长链更接近确定轨迹，适合降低几何误差。
+                因此链长并非单调优化的超参数，而是在分布覆盖与确定性之间调节。论文的实验图展示了该权衡，
+                但在复现报告中更需要明确写出：你报告的结果是在链上哪个位置、用什么采样器、用多少候选得到的。
+              </p>
+              <p>
+                Transformer decoder 用于建模去噪过程中的时序相关性。轨迹是短序列，但扩散去噪需要在每个时间步理解整个未来片段的相关性。
+                某个点的修正会影响后续速度和转向，不能把 12 帧未来完全当作独立坐标。Self-attention 提供的是跨时间位置的信息交换，
+                这与扩散链中逐步修正整条轨迹的需求相匹配。
+              </p>
+              <p>
+                MID 的主要贡献在于把运动不确定性建模为可训练的 Markov 反向过程。
+                该过程解释了采样步数敏感性，也解释了其可与 Trajectron++ encoder 组合的原因：
+                编码器负责条件特征，扩散解码器负责条件生成。
+              </p>
+              <div class="formula-line mid-formula">
+                <span>q(yk | y0) = N(sqrt(alpha_bar_k) y0, (1 - alpha_bar_k) I)</span>
+                <span>p_theta(yk-1 | yk, f): conditional reverse transition</span>
+                <span>L = E ||epsilon - epsilon_theta(yk, k, x)||</span>
+              </div>
+            </div>
+
+            <figure class="paper-figure compact-figure interactive-figure">
+              <div class="figure-toolbar" role="group" aria-label="选择 MID 去噪阶段">
+                <button type="button" data-mid-stage="noise">noise</button>
+                <button type="button" data-mid-stage="coarse">coarse</button>
+                <button type="button" data-mid-stage="refine">refine</button>
+                <button type="button" class="is-active" data-mid-stage="clean">clean</button>
+              </div>
+              <svg class="mid-denoise" viewBox="0 0 620 310" role="img" aria-label="MID 去噪阶段" xmlns="http://www.w3.org/2000/svg">
+                <rect x="38" y="24" width="520" height="220" rx="5" fill="#ffffff" stroke="none" />
+                <g class="mini-grid">
+                  <path d="M78 54H530M78 96H530M78 138H530M78 180H530M78 222H530" />
+                  <path d="M78 54V230M146 54V230M214 54V230M282 54V230M350 54V230M418 54V230M486 54V230" />
+                </g>
+                <path d="M78 230H538M78 230V46" class="svg-axis" />
+                <g class="mid-stage" data-stage="noise">
+                  <path d="M90 88C126 42 156 128 204 82C252 36 282 146 330 94C378 44 420 134 528 76" class="noise-line" />
+                  <path d="M86 180C138 112 170 220 226 162C282 104 330 218 388 158C444 100 480 194 532 146" class="noise-line faint" />
+                </g>
+                <g class="mid-stage" data-stage="coarse">
+                  <path d="M92 202C148 158 198 176 250 132C308 84 394 118 526 84" class="sample-line" />
+                  <path d="M94 220C160 202 204 164 266 174C330 184 416 150 526 126" class="sample-line faint" />
+                </g>
+                <g class="mid-stage" data-stage="refine">
+                  <path d="M92 214C150 188 202 162 252 138C320 106 414 88 526 76" class="sample-line" />
+                  <path d="M92 214C154 190 204 170 260 158C334 140 420 132 528 122" class="sample-line faint" />
+                </g>
+                <g class="mid-stage is-active" data-stage="clean">
+                  <path d="M92 214C150 190 202 166 254 140C324 104 416 84 526 76" class="sample-line final" />
+                  <path d="M92 214C154 190 206 174 264 162C338 144 424 132 528 122" class="sample-line faint" />
+                  <path d="M92 214C150 194 204 186 266 184C342 182 430 194 528 210" class="sample-line faint" />
+                </g>
+                <text x="88" y="274" class="svg-small" data-mid-caption>clean: 最终轨迹样本贴合历史条件并保留多模态分支</text>
+              </svg>
+              <figcaption>
+                Figure 5. MID 的交互图只展示“形态变化”：从噪声到粗略方向，再到由历史条件约束出的轨迹样本。
+              </figcaption>
+            </figure>
+          </section>
+
+          <section class="chapter" id="compare" aria-labelledby="compare-title">
+            <p class="chapter-index">Chapter 6</p>
+            <h2 id="compare-title">方法比较</h2>
+            <div class="reading-column">
+              <p>
+                三篇论文分别强化轨迹预测中的不同层面。SGAN 强调社会可接受性与多样性训练；
+                Trajectron++ 强调结构化场景表示、异构数据和动态可行性；MID 强调用扩散过程表达运动不确定性。
+              </p>
+              <p>
+                若研究目标是分析交互关系，Trajectron++ 的图结构比 SGAN 的 pooled vector 更直接。
+                若目标是构建较简洁的多样候选生成框架，SGAN 具有较低结构复杂度。
+                若目标是分析生成过程对 diversity 与 determinacy 的控制，MID 提供了更细粒度的生成机制。
+              </p>
+              <p>
+                方法比较应同时列出随机性来源、交互建模、训练目标和评估口径。
+                缺少任一维度，ADE/FDE 或模型结构的比较都可能失真。
+              </p>
+              <p>
+                三种方法在复现阶段对应不同风险。SGAN 需要关注 GAN 训练稳定性与 best-of-k；
+                Trajectron++ 需要关注图构建、地图坐标和 latent mode policy；
+                MID 需要关注采样器、反向步数和 checkpoint。方法比较应服务于这些可复现条件。
+              </p>
+            </div>
+
+            <div class="method-tabs" role="tablist" aria-label="方法摘要切换">
+              <button type="button" class="is-active" role="tab" aria-selected="true" data-method-tab="sgan">SGAN</button>
+              <button type="button" role="tab" aria-selected="false" data-method-tab="traj">Trajectron++</button>
+              <button type="button" role="tab" aria-selected="false" data-method-tab="mid">MID</button>
+            </div>
+            <div class="method-panels">
+              <section class="method-panel is-active" data-method-panel="sgan">
+                <h3>Social GAN</h3>
+                <p>Adversarial loss 用于学习 socially acceptable trajectories，Variety Loss 用于提升候选集覆盖。</p>
+              </section>
+              <section class="method-panel" data-method-panel="traj">
+                <h3>Trajectron++</h3>
+                <p>Directed spatiotemporal graph 编码交互与异构数据，discrete CVAE latent states 表达高层行为模式。</p>
+              </section>
+              <section class="method-panel" data-method-panel="mid">
+                <h3>MID</h3>
+                <p>Motion indeterminacy diffusion 将高不确定轨迹分布通过条件反向 Markov 链逐步还原。</p>
+              </section>
+            </div>
+
+            <div class="table-scroll" role="region" aria-label="三种方法对比表" tabindex="0">
+              <table class="comparison-table">
+                <thead>
+                  <tr>
+                    <th>维度</th>
+                    <th>Social GAN</th>
+                    <th>Trajectron++</th>
+                    <th>MID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th>随机性来源</th>
+                    <td>生成器噪声 z，含义隐式，多次采样得到候选集合。</td>
+                    <td>离散 categorical latent variable z，可枚举高层模式。</td>
+                    <td>扩散链中的噪声轨迹 yK 到 y0，随机性分布在多个去噪步骤。</td>
+                  </tr>
+                  <tr>
+                    <th>交互建模</th>
+                    <td>相对位置 + MLP + max pooling，得到每个行人的全局 pooled vector。</td>
+                    <td>Directed spatiotemporal graph，节点、边、地图和自车未来计划分开编码。</td>
+                    <td>可接入既有 temporal-social encoder；论文实验使用 Trajectron++ 编码器。</td>
+                  </tr>
+                  <tr>
+                    <th>训练目标</th>
+                    <td>对抗损失判断轨迹是否真实，Variety Loss 鼓励候选覆盖。</td>
+                    <td>CVAE / InfoVAE 风格目标，训练离散潜变量和条件解码器。</td>
+                    <td>预测扩散过程中加入的噪声，优化条件反向去噪。</td>
+                  </tr>
+                  <tr>
+                    <th>主要风险</th>
+                    <td>GAN 不稳定，best-of-k 指标随 k 变化大，潜在意图不可解释。</td>
+                    <td>Full、Most Likely、采样模式容易混用，图构建和坐标变换复杂。</td>
+                    <td>采样步数和 DDPM/DDIM 设置影响速度与指标，生成链解释成本较高。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="chapter" id="results" aria-labelledby="results-title">
+            <p class="chapter-index">Chapter 7</p>
+            <h2 id="results-title">复现实验与评估口径</h2>
+            <div class="reading-column">
+              <p>
+                复现结果列于下表。由于三种方法采用的采样策略和输出模式不同，
+                这些数值应与评估设置一并报告。对随机轨迹预测而言，指标数值和生成口径不可分离。
+              </p>
+              <p>
+                Social GAN 的 0.84 / 1.55 来自 best-of-20 设置；Trajectron++ 的 0.392 / 0.828 来自 Full · Best-of-20；
+                MID 的 0.408 / 0.728 来自 DDPM-100 · epoch 90。三者均使用 ETH 场景，
+                但 ADE/FDE 分别对应单次预测、候选覆盖或潜变量枚举后的不同评价对象。
+              </p>
+              <p>
+                Best-of-N 会随采样数量增大而降低误差；Full 与 Most Likely 对应不同 latent mode policy；
+                MID 的采样链长度影响 diversity 与 determinacy。因此，复现报告应优先记录评估协议，再比较数值。
+              </p>
+              <p>
+                ADE/FDE 表格可视为实验日志摘要。随机模型必须说明采样预算，
+                概率模型必须说明模式选择，扩散模型必须说明采样过程。
+                这些条件决定结果差异来自模型、数据、代码还是评估定义。
+              </p>
+              <p>
+                下方示意图仅用于展示采样数量与评估模式对指标含义的影响，不引入新的实验结果。
+              </p>
+            </div>
+
+            <div class="table-scroll" role="region" aria-label="ETH 复现指标表" tabindex="0">
+              <table class="results-table">
+                <thead>
+                  <tr>
+                    <th>方法</th>
+                    <th>评估设置</th>
+                    <th>ADE ↓</th>
+                    <th>FDE ↓</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th>Social GAN</th>
+                    <td>pred_len = 12, best-of-20</td>
+                    <td>0.84</td>
+                    <td>1.55</td>
+                  </tr>
+                  <tr>
+                    <th>Trajectron++</th>
+                    <td>Full · Best-of-20</td>
+                    <td>0.392</td>
+                    <td>0.828</td>
+                  </tr>
+                  <tr>
+                    <th>MID</th>
+                    <td>DDPM-100 · epoch 90</td>
+                    <td>0.408</td>
+                    <td>0.728</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <figure class="paper-figure compact-figure results-figure">
+              <div class="result-controls">
+                <label for="sampleRange">采样数量 N: <span data-sample-value>20</span></label>
+                <input id="sampleRange" type="range" min="1" max="20" value="20" step="1" data-sample-range />
+                <div class="eval-buttons" role="group" aria-label="评估口径">
+                  <button type="button" data-eval-mode="full" class="is-active">Full</button>
+                  <button type="button" data-eval-mode="ml">ML</button>
+                  <button type="button" data-eval-mode="best">Best-of-N</button>
+                </div>
+              </div>
+              <svg class="metric-chart" viewBox="0 0 780 340" role="img" aria-label="ADE 和 FDE 复现指标示意" xmlns="http://www.w3.org/2000/svg">
+                <rect x="40" y="28" width="700" height="250" rx="5" fill="#ffffff" stroke="none" />
+                <path d="M110 242H700M110 72V242" class="svg-axis" />
+                <g class="mini-grid">
+                  <path d="M110 202H700M110 162H700M110 122H700M110 82H700" />
+                </g>
+                <g data-metric-bars>
+                  <rect x="160" y="96" width="54" height="146" class="metric-bar sgan-bar" data-base-height="146" />
+                  <rect x="220" y="142" width="54" height="100" class="metric-bar sgan-bar pale" data-base-height="100" />
+                  <rect x="330" y="174" width="54" height="68" class="metric-bar traj-bar" data-base-height="68" />
+                  <rect x="390" y="164" width="54" height="78" class="metric-bar traj-bar pale" data-base-height="78" />
+                  <rect x="500" y="171" width="54" height="71" class="metric-bar mid-bar" data-base-height="71" />
+                  <rect x="560" y="177" width="54" height="65" class="metric-bar mid-bar pale" data-base-height="65" />
+                </g>
+                <text x="187" y="267" class="svg-small" text-anchor="middle">SGAN</text>
+                <text x="387" y="267" class="svg-small" text-anchor="middle">Traj++</text>
+                <text x="557" y="267" class="svg-small" text-anchor="middle">MID</text>
+                <text x="187" y="84" class="metric-label" data-metric-label="sgan">0.84 / 1.55</text>
+                <text x="358" y="160" class="metric-label" data-metric-label="traj">0.392 / 0.828</text>
+                <text x="530" y="158" class="metric-label" data-metric-label="mid">0.408 / 0.728</text>
+                <text x="620" y="60" class="svg-small">solid: ADE, pale: FDE</text>
+              </svg>
+              <figcaption>
+                Figure 6. 采样数量与评估模式改变 ADE/FDE 的评价对象；该图仅作评估口径示意。
+              </figcaption>
+            </figure>
+
+            <div class="notes-panel" aria-label="复现实验注意事项">
+              <h3>复现记录建议</h3>
+              <ol>
+                <li>报告 ADE/FDE 时同时记录预测长度、采样数量和 best-of-N 设置。</li>
+                <li>Trajectron++ 必须区分 Full、Most Likely、z-mode 和随机采样，不把它们混写成一个“模型结果”。</li>
+                <li>MID 必须记录 DDPM/DDIM、反向步数、checkpoint 和是否使用相同 encoder。</li>
+                <li>比较结果前需统一评估协议；无法统一时应明确标注不可直接排序。</li>
+              </ol>
+            </div>
+          </section>
+
+          <section class="chapter video-showcase" id="video" aria-labelledby="video-title">
+            <p class="chapter-index">Chapter 8</p>
+            <h2 id="video-title">视频展示</h2>
+            <div class="reading-column">
+              <p>
+                下方视频汇总本次复现工作的整体展示，包括研究问题、三种生成式轨迹预测方法、
+                复现实验结果以及网页中的关键可视化内容。
+              </p>
+            </div>
+            <div class="video-frame" aria-label="轨迹预测复现工作视频展示">
+              <video class="project-video" controls preload="metadata" playsinline>
+                <source src="Trajectory_Forecasting.mp4" type="video/mp4" />
+                您的浏览器不支持视频播放。
+              </video>
+              <p class="video-caption">
+                Video 1. 课程复现工作展示视频：Trajectory_Forecasting.mp4。
+              </p>
+            </div>
+          </section>
+
+          <section class="chapter references" id="references" aria-labelledby="references-title">
+            <p class="chapter-index">References</p>
+            <h2 id="references-title">参考文献</h2>
+            <div class="reading-column">
+              <p>
+                参考文献包括三篇轨迹预测论文及项目中的本地 PDF 文件。
+              </p>
+            </div>
+            <ol class="reference-list">
+              <li>
+                <a href="https://arxiv.org/abs/1803.10892" target="_blank" rel="noreferrer">
+                  Social GAN: Socially Acceptable Trajectories with Generative Adversarial Networks
+                </a>
+                <span>本地文件：1803.10892v1.pdf。重点参考：多模态问题动机、global pooling、GAN 判别器、Variety Loss。</span>
+              </li>
+              <li>
+                <a href="https://arxiv.org/abs/2001.03093" target="_blank" rel="noreferrer">
+                  Trajectron++: Dynamically-Feasible Trajectory Forecasting With Heterogeneous Data
+                </a>
+                <span>本地文件：2001.03093v5.pdf。重点参考：有向时空图、异构数据、CVAE 离散潜变量、Full/ML 评估口径。</span>
+              </li>
+              <li>
+                <a href="https://arxiv.org/abs/2203.13777" target="_blank" rel="noreferrer">
+                  Stochastic Trajectory Prediction via Motion Indeterminacy Diffusion
+                </a>
+                <span>本地文件：2203.13777v1.pdf。重点参考：Motion Indeterminacy Diffusion、Transformer decoder、反向扩散步数与多样性权衡。</span>
+              </li>
+            </ol>
+          </section>
+        </div>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span>课程复现小组 · ETH/UCY trajectory forecasting survey</span>
+    <a href="#hero">Back to top</a>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
