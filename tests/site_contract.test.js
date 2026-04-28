@@ -68,7 +68,7 @@ assert(/Motion Indeterminacy Diffusion|运动不确定性扩散/.test(html), "mi
 assert(/socially acceptable|社会可接受/.test(html), "missing Social GAN source-paper concept");
 assert(/本小组围绕行人轨迹预测开展论文复现工作/.test(html), "missing opening summary of group reproduction work");
 assert(/href=["']#video["'][^>]*>\s*8\.\s*视频展示/.test(html), "missing video section table-of-contents entry");
-assert(/<video\b[\s\S]*Trajectory_Forecasting\.mp4/.test(html), "missing trajectory forecasting video embed");
+assert(/<video\b[\s\S]*202604290010\.mp4/.test(html), "missing updated trajectory forecasting video embed");
 assert(!/class=["'][^"']*hero-equation/.test(html), "opening Target/X/Y/C definition block should be removed");
 assert(!/Gaussian BP|Gaussian Belief Propagation|参考站点|没有复制|网页设计/.test(html), "page should not include off-topic design commentary");
 assert(!/不是手写规则|谁影响谁|不要把三种方法|阅读重点/.test(html), "headings should use formal paper-style language");
